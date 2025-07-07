@@ -18,6 +18,7 @@ CH_PASSWORD = os.environ.get('CH_PASSWORD')
 CH_DATABASE = os.environ.get('CH_DATABASE')
 CH_TABLE = os.environ.get('CH_TABLE', 'install')
 
+
 # Header mapping: Appsflyer => ClickHouse
 APPSFLYER_TO_CH = {
     "Attributed Touch Type": "attributed_touch_type",
@@ -82,24 +83,26 @@ def parse_datetime(val):
     s = str(val).strip()
     if s.lower() in ('', 'null', 'none', 'n/a'):
         return None
-    match = re.match(r"^(\d{4}-\d{2}-\d{2}) (\d{1,2}):(\d{2}):(\d{2})$", s)
-    if match:
-        date_part, hour, minute, second = match.groups()
-        hour = hour.zfill(2)
-        return f"{date_part} {hour}:{minute}:{second}"
-    if re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", s):
-        return s
-    print(f"⚠️ DateTime sai định dạng: '{val}' -> set NULL")
-    return None
+    # Normalize and convert to datetime object
+    try:
+        # Thêm số 0 phía trước giờ nếu cần
+        match = re.match(r"^(\d{4}-\d{2}-\d{2}) (\d{1,2}):(\d{2}):(\d{2})$", s)
+        if match:
+            date_part, hour, minute, second = match.groups()
+            hour = hour.zfill(2)
+            s = f"{date_part} {hour}:{minute}:{second}"
+        return datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
+    except Exception:
+        print(f"⚠️ DateTime sai định dạng: '{val}' -> set None")
+        return None
 
 def get_today_str():
     # Lấy ngày hiện tại dạng yyyy-mm-dd theo giờ VN (UTC+7)
-    now = datetime.utcnow()
-    now_vn = now.timestamp() + 7*3600
-    return datetime.fromtimestamp(now_vn).strftime('%Y-%m-%d')
+    now = datetime.utcnow().timestamp() + 7*3600
+    return datetime.fromtimestamp(now).strftime('%Y-%m-%d')
 
 def main():
-    today = get_today_str()  # Lấy data ngày hiện tại
+    today = get_today_str()  # Lấy data ngày hiện tại (giờ VN)
     url = f"https://hq1.appsflyer.com/api/raw-data/export/app/{APP_ID}/installs_report/v5?from={today}&to={today}&timezone=Asia%2FHo_Chi_Minh"
     headers = {"Authorization": APPSFLYER_TOKEN, "accept": "text/csv"}
     resp = requests.get(url, headers=headers)
@@ -110,6 +113,7 @@ def main():
     csvfile = StringIO(resp.text)
     reader = csv.DictReader(csvfile)
     raw_headers = reader.fieldnames
+
     # Map cột Appsflyer sang ClickHouse
     header_map = [APPSFLYER_TO_CH.get(h, None) for h in raw_headers]
     col_idx_map = {ch_col: i for i, ch_col in enumerate(header_map) if ch_col}
