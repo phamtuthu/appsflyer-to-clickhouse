@@ -9,14 +9,14 @@ from clickhouse_driver import Client
 import os
 
 APPSFLYER_TOKEN = os.environ.get('APPSFLYER_TOKEN')
-APP_ID = os.environ.get('APP_ID', 'vn.ghn.app.shiip')
+APP_ID = os.environ.get('APP_ID')
 
 CH_HOST = os.environ.get('CH_HOST')
 CH_PORT = int(os.environ.get('CH_PORT', 9000))
 CH_USER = os.environ.get('CH_USER')
 CH_PASSWORD = os.environ.get('CH_PASSWORD')
 CH_DATABASE = os.environ.get('CH_DATABASE')
-CH_TABLE = os.environ.get('CH_TABLE', 'install')
+CH_TABLE = os.environ.get('CH_TABLE')
 
 APPSFLYER_TO_CH = {
     "Attributed Touch Type": "attributed_touch_type",
