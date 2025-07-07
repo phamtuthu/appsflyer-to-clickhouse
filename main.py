@@ -6,15 +6,17 @@ import re
 from datetime import datetime
 
 # --- Config ---
-APPSFLYER_TOKEN = 'Bearer YOUR_API_TOKEN'
-APP_ID = 'vn.ghn.app.shiip'
+import os
 
-CH_HOST = '103.232.122.212'
-CH_PORT = 9000
-CH_USER = 'default'
-CH_PASSWORD = 'thinv'
-CH_DATABASE = 'ghn_c2'
-CH_TABLE = 'install'
+APPSFLYER_TOKEN = os.environ.get('APPSFLYER_TOKEN')
+APP_ID = os.environ.get('APP_ID', 'vn.ghn.app.shiip')
+
+CH_HOST = os.environ.get('CH_HOST')
+CH_PORT = int(os.environ.get('CH_PORT', 9000))
+CH_USER = os.environ.get('CH_USER')
+CH_PASSWORD = os.environ.get('CH_PASSWORD')
+CH_DATABASE = os.environ.get('CH_DATABASE')
+CH_TABLE = os.environ.get('CH_TABLE', 'install')
 
 # Header mapping: Appsflyer => ClickHouse
 APPSFLYER_TO_CH = {
