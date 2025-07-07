@@ -1,16 +1,14 @@
 import os
 import requests
-import pandas as pd
+import csv
 from io import StringIO
+import re
 from datetime import datetime, timedelta, timezone
 from clickhouse_driver import Client
 
-# --- Config ---
-import os
-
+# --- Config từ biến môi trường hoặc ghi trực tiếp ---
 APPSFLYER_TOKEN = os.environ.get('APPSFLYER_TOKEN')
 APP_ID = os.environ.get('APP_ID')
-
 CH_HOST = os.environ.get('CH_HOST')
 CH_PORT = int(os.environ.get('CH_PORT', 9000))
 CH_USER = os.environ.get('CH_USER')
@@ -78,6 +76,30 @@ ADDITIONAL_FIELDS = (
     'engagement_type,gdpr_applies,ad_user_data_enabled,ad_personalization_enabled'
 )
 
+DATETIME_CH_COLS = {
+    "attributed_touch_time", "install_time", "event_time",
+    "contributor_1_touch_time", "contributor_2_touch_time",
+    "contributor_3_touch_time", "device_download_time"
+}
+
+def parse_datetime(val):
+    if val is None:
+        return None
+    s = str(val).strip()
+    if s.lower() in ('', 'null', 'none', 'n/a'):
+        return None
+    try:
+        # Xử lý dạng giờ 1 số ("8:05:00" -> "08:05:00")
+        match = re.match(r"^(\d{4}-\d{2}-\d{2}) (\d{1,2}):(\d{2}):(\d{2})$", s)
+        if match:
+            date_part, hour, minute, second = match.groups()
+            hour = hour.zfill(2)
+            s = f"{date_part} {hour}:{minute}:{second}"
+        return datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
+    except Exception:
+        print(f"⚠️ DateTime sai định dạng: '{val}' -> set None")
+        return None
+
 def get_vn_time_range(hours=2):
     now_utc = datetime.now(timezone.utc)
     now_vn = now_utc + timedelta(hours=7)
@@ -86,8 +108,6 @@ def get_vn_time_range(hours=2):
     return from_time.strftime('%Y-%m-%d %H:%M:%S'), to_time.strftime('%Y-%m-%d %H:%M:%S')
 
 def download_appsflyer_installs(from_time, to_time):
-    # AppsFlyer API chỉ nhận yyyy-mm-dd HH:MM:SS, nhưng khuyên dùng ISO8601
-    # Để chắc chắn nên lấy data từ start to end (timezone Asia/Ho_Chi_Minh)
     url = (
         f"https://hq1.appsflyer.com/api/raw-data/export/app/{APP_ID}/installs_report/v5"
         f"?from={from_time}&to={to_time}&timezone=Asia%2FHo_Chi_Minh"
@@ -97,26 +117,37 @@ def download_appsflyer_installs(from_time, to_time):
     resp = requests.get(url, headers=headers)
     if resp.status_code != 200:
         print("❌ Error:", resp.text)
-        return None
+        return []
     csvfile = StringIO(resp.text)
-    df = pd.read_csv(csvfile)
-    # Chuẩn hóa header BOM
-    df.rename(columns=lambda x: x.strip('\ufeff'), inplace=True)
-    return df
+    reader = csv.DictReader(csvfile)
+    # Remove BOM if exists
+    reader.fieldnames = [h.strip('\ufeff') for h in reader.fieldnames]
+    data = [row for row in reader]
+    return data
 
 def main():
     from_time, to_time = get_vn_time_range(2)
-    print(f"🕒 Đang lấy data AppsFlyer từ {from_time} đến {to_time} (Asia/Ho_Chi_Minh)")
-    df = download_appsflyer_installs(from_time, to_time)
-    if df is None or df.empty:
+    print(f"🕒 Lấy AppsFlyer từ {from_time} đến {to_time} (Asia/Ho_Chi_Minh)")
+    raw_data = download_appsflyer_installs(from_time, to_time)
+    if not raw_data:
         print("⚠️ Không có data AppsFlyer trong khoảng này.")
         return
 
-    # Chỉ lấy đúng các cột map cho ClickHouse
-    col_map = {h: APPSFLYER_TO_CH[h] for h in df.columns if h in APPSFLYER_TO_CH}
-    df = df[list(col_map.keys())]
-    df.rename(columns=col_map, inplace=True)
-    ch_columns = list(df.columns)
+    # Chuẩn hóa cột và lấy đúng thứ tự mapping
+    appsflyer_cols = list(APPSFLYER_TO_CH.keys())
+    ch_cols = list(APPSFLYER_TO_CH.values())
+
+    # Chuẩn hóa & map sang đúng format
+    mapped_data = []
+    for row in raw_data:
+        mapped_row = []
+        for af_col, ch_col in zip(appsflyer_cols, ch_cols):
+            val = row.get(af_col)
+            if ch_col in DATETIME_CH_COLS:
+                mapped_row.append(parse_datetime(val))
+            else:
+                mapped_row.append(val if val not in (None, "", "null", "None") else None)
+        mapped_data.append(mapped_row)
 
     # Query ClickHouse để lấy các appsflyer_id đã có trong khoảng from_time → to_time
     client = Client(
@@ -128,18 +159,21 @@ def main():
     existed = set(str(r[0]) for r in result if r[0])
     print(f"🔎 Có {len(existed)} ID đã tồn tại trong ClickHouse.")
 
-    df_new = df[~df['appsflyer_id'].astype(str).isin(existed)]
-    print(f"➕ Số dòng mới sẽ insert: {len(df_new)}")
+    # Lọc dòng mới
+    afid_idx = ch_cols.index('appsflyer_id')
+    new_rows = [row for row in mapped_data if row[afid_idx] and row[afid_idx] not in existed]
+    print(f"➕ Số dòng mới sẽ insert: {len(new_rows)}")
 
-    if not df_new.empty:
-        rows_to_insert = df_new.where(pd.notnull(df_new), None).values.tolist()
+    if new_rows:
         client.execute(
-            f"INSERT INTO {CH_TABLE} ({', '.join(ch_columns)}) VALUES",
-            rows_to_insert
+            f"INSERT INTO {CH_TABLE} ({', '.join(ch_cols)}) VALUES",
+            new_rows
         )
         print("✅ Đã insert lên ClickHouse xong!")
     else:
         print("Không có dòng mới để insert.")
+
+    client.disconnect()
 
 if __name__ == "__main__":
     main()
