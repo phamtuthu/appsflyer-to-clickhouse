@@ -24,7 +24,6 @@ APPSFLYER_TO_CH = {
     "Event Name": "event_name",
     "Partner": "partner",
     "Media Source": "media_source",
-    "Campaign ID": "campaignid", 
     "Campaign": "campaign",
     "Adset": "adset",
     "Ad": "ad",
@@ -65,7 +64,8 @@ APPSFLYER_TO_CH = {
     "Match Type": "match_type",
     "Device Download Time": "device_download_time",
     "Device Model": "device_model",
-    "Engagement Type": "engagement_type"
+    "Engagement Type": "engagement_type",
+    "Campaign ID": "campaignid", 
 }
 ADDITIONAL_FIELDS = (
     'blocked_reason_rule,store_reinstall,impressions,contributor3_match_type,custom_dimension,conversion_type,'
