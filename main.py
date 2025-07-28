@@ -24,6 +24,7 @@ APPSFLYER_TO_CH = {
     "Event Name": "event_name",
     "Partner": "partner",
     "Media Source": "media_source",
+    "Campaign ID": "campaignid", 
     "Campaign": "campaign",
     "Adset": "adset",
     "Ad": "ad",
@@ -73,7 +74,8 @@ ADDITIONAL_FIELDS = (
     'keyword_match_type,contributor1_match_type,contributor2_match_type,device_model,monetization_network,'
     'segment,is_lat,gp_referrer,blocked_reason_value,store_product_page,device_category,app_type,'
     'rejected_reason_value,ad_unit,keyword_id,placement,network_account_id,install_app_store,amazon_aid,att,'
-    'engagement_type,gdpr_applies,ad_user_data_enabled,ad_personalization_enabled'
+    'engagement_type,gdpr_applies,ad_user_data_enabled,ad_personalization_enabled,'
+    'campaign_id'
 )
 
 DATETIME_CH_COLS = {
@@ -138,6 +140,18 @@ def main():
     # Chuẩn hóa cột và lấy đúng thứ tự mapping
     appsflyer_cols = list(APPSFLYER_TO_CH.keys())
     ch_cols = list(APPSFLYER_TO_CH.values())
+
+    # ĐẢM BẢO campaignid đúng vị trí sau media_source
+    # Nếu bạn muốn chính xác hơn nữa, có thể re-order:
+    def reorder_cols(cols):
+        media_source_idx = cols.index("media_source")
+        cols_new = cols[:media_source_idx+1] + ["campaignid"] + [c for c in cols if c not in ("media_source", "campaignid")]
+        return cols_new
+
+    # Áp dụng cho cả AppsFlyer cols và ClickHouse cols (nếu cần re-order)
+    if "campaignid" in ch_cols:
+        ch_cols = reorder_cols(ch_cols)
+        appsflyer_cols = reorder_cols(appsflyer_cols)
 
     # Chuẩn hóa & map sang đúng format
     mapped_data = []
